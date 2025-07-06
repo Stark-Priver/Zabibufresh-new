@@ -1,0 +1,59 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") // Make sure to set this environment variable
+}
+
+model User {
+  id         String    @id @default(uuid())
+  fullName   String
+  email      String    @unique
+  phone      String    @unique
+  role       Role
+  password   String // Will be hashed by Supabase Auth
+  createdAt  DateTime  @default(now())
+  products   Product[] // Relation to Product model (seller)
+  sentMessages Message[] @relation("SenderMessages")
+  receivedMessages Message[] @relation("ReceiverMessages")
+}
+
+model Product {
+  id          String    @id @default(uuid())
+  title       String
+  description String
+  imageUrl    String    // URL from Supabase Storage
+  price       Float
+  quantity    Int
+  location    String
+  sellerId    String
+  seller      User      @relation(fields: [sellerId], references: [id])
+  createdAt   DateTime  @default(now())
+  messages    Message[] // Relation to Message model
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  senderId   String
+  sender     User     @relation("SenderMessages", fields: [senderId], references: [id])
+  receiverId String
+  receiver   User     @relation("ReceiverMessages", fields: [receiverId], references: [id])
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  content    String
+  timestamp  DateTime @default(now())
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([productId])
+}
+
+enum Role {
+  seller
+  buyer
+}
