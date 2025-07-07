@@ -62,23 +62,8 @@ const ProductsScreen = () => {
                 .eq('id', productId);
               if (dbError) throw dbError;
 
-              // 2. Delete image from Supabase Storage
-              // Extract the path from the public URL. This is a bit naive and depends on URL structure.
-              // Example URL: https://<project-ref>.supabase.co/storage/v1/object/public/product-images/<sellerId>/<filename.ext>
-              // Path to remove: <sellerId>/<filename.ext>
-              if (imageUrl) {
-                const urlParts = imageUrl.split('/');
-                const imagePath = urlParts.slice(urlParts.indexOf('product-images') + 1).join('/');
-                if (imagePath) {
-                    const { error: storageError } = await supabase.storage
-                    .from('product-images')
-                    .remove([imagePath]);
-                  if (storageError) {
-                    console.warn("Error deleting image from storage, but product deleted from DB:", storageError.message);
-                    Alert.alert("Product Deleted", "Product data was deleted, but there was an issue removing the image from storage. Please check storage manually if needed.");
-                  }
-                }
-              }
+              // Image is stored in DB, no need to delete from Supabase Storage.
+              // If there were other related cleanup, it would go here.
 
               Alert.alert('Success', 'Product deleted successfully.');
               fetchProducts(); // Refresh the list
@@ -96,7 +81,11 @@ const ProductsScreen = () => {
 
   const renderProductItem = ({ item }) => (
     <View style={styles.productItem}>
-      <Image source={{ uri: item.imageUrl || 'https://via.placeholder.com/150?text=No+Image' }} style={styles.productImage} />
+      {/* Display image from base64 data or a placeholder */}
+      <Image
+        source={item.image ? { uri: `data:image/jpeg;base64,${item.image}` } : { uri: 'https://via.placeholder.com/150?text=No+Image' }}
+        style={styles.productImage}
+      />
       <View style={styles.productDetails}>
         <Text style={styles.productTitle}>{item.title}</Text>
         <Text style={styles.productPrice}>TZS {item.price.toLocaleString()}</Text>

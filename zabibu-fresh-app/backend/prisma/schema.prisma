@@ -27,7 +27,7 @@ model Product {
   id          String    @id @default(uuid())
   title       String
   description String
-  imageUrl    String    // URL from Supabase Storage
+  image       Bytes // Image stored directly in the database
   price       Float
   quantity    Int
   location    String
