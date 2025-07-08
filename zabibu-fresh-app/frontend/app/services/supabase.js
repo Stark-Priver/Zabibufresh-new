@@ -1,15 +1,14 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
 
-// Store these in a .env file and use react-native-dotenv
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL; // Replace with your Supabase URL
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY; // Replace with your Supabase anon key
+// Get environment variables
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn(
     "Supabase URL or Anon Key is missing. Please check your environment variables."
   );
-  // Potentially throw an error or handle this case more gracefully in a real app
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -23,7 +22,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
 /**
  * Helper function to get the current user's session.
- * @returns {Promise<import('@supabase/supabase-js').Session | null>} The user session or null.
  */
 export const getSession = async () => {
   const {
@@ -39,7 +37,6 @@ export const getSession = async () => {
 
 /**
  * Helper function to get the current authenticated user.
- * @returns {Promise<import('@supabase/supabase-js').User | null>} The user object or null.
  */
 export const getUser = async () => {
   const {
@@ -54,49 +51,50 @@ export const getUser = async () => {
 };
 
 /**
- * Fetches the user profile from the 'User' table based on the authenticated user's ID.
- * @param {string} userId - The ID of the authenticated user.
- * @returns {Promise<object | null>} The user profile object or null if not found or error.
+ * Fetches the user profile from the 'profiles' table.
  */
 export const getUserProfile = async (userId) => {
   if (!userId) return null;
   try {
     const { data, error, status } = await supabase
-      .from("User") // Ensure this matches your Prisma model name
-      .select(`fullName, phone, role, createdAt`)
+      .from("profiles")
+      .select(`full_name, phone, role, created_at`)
       .eq("id", userId)
       .single();
 
     if (error && status !== 406) {
-      // 406 means no rows found, which is a valid case for a new user
       console.error("Error fetching user profile:", error.message);
       throw error;
     }
 
-    return data;
+    return data ? {
+      id: userId,
+      fullName: data.full_name,
+      phone: data.phone,
+      role: data.role,
+      createdAt: data.created_at
+    } : null;
   } catch (error) {
-    console.error("Catch block error fetching user profile:", error.message);
+    console.error("Error fetching user profile:", error.message);
     return null;
   }
 };
 
 /**
- * Creates a user profile in the 'User' table.
- * This should be called after successful signup.
- * @param {object} profileData - The profile data to insert.
- * @param {string} profileData.id - The user's auth ID.
- * @param {string} profileData.fullName - User's full name.
- * @param {string} profileData.phone - User's phone number.
- * @param {('seller'|'buyer')} profileData.role - User's role.
- * @returns {Promise<object | null>} The created user profile object or null on error.
+ * Creates a user profile in the 'profiles' table.
  */
 export const createUserProfile = async (profileData) => {
   try {
     const { data, error } = await supabase
-      .from("User") // Ensure this matches your Prisma model name
-      .insert([profileData])
+      .from("profiles")
+      .insert([{
+        id: profileData.id,
+        full_name: profileData.fullName,
+        phone: profileData.phone,
+        role: profileData.role
+      }])
       .select()
-      .single(); // Assuming you want the inserted row back
+      .single();
 
     if (error) {
       console.error("Error creating user profile:", error.message);
@@ -104,19 +102,13 @@ export const createUserProfile = async (profileData) => {
     }
     return data;
   } catch (error) {
-    console.error("Catch block error creating user profile:", error.message);
+    console.error("Error creating user profile:", error.message);
     return null;
   }
 };
 
 /**
  * Sign up a new user with phone and password
- * @param {object} userData - User data for signup
- * @param {string} userData.phone - User's phone number
- * @param {string} userData.password - User's password
- * @param {string} userData.fullName - User's full name
- * @param {('seller'|'buyer')} userData.role - User's role
- * @returns {Promise<{data: object, error: object}>} Signup result
  */
 export const signUp = async (userData) => {
   try {
@@ -137,26 +129,6 @@ export const signUp = async (userData) => {
       return { data: null, error };
     }
 
-    // The database trigger should handle creating the user profile
-    // But if it fails, we can create it manually as a fallback
-    if (data.user && !data.user.phone_confirmed_at) {
-      // Wait a bit for the trigger to complete
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Check if profile was created by trigger
-      const profile = await getUserProfile(data.user.id);
-      if (!profile) {
-        console.log("Trigger failed, creating profile manually...");
-        const profileData = {
-          id: data.user.id,
-          fullName: userData.fullName,
-          phone: userData.phone,
-          role: userData.role,
-        };
-        await createUserProfile(profileData);
-      }
-    }
-
     return { data, error: null };
   } catch (error) {
     console.error("Signup exception:", error.message);
@@ -166,9 +138,6 @@ export const signUp = async (userData) => {
 
 /**
  * Sign in a user with phone and password
- * @param {string} phone - User's phone number
- * @param {string} password - User's password
- * @returns {Promise<{data: object, error: object}>} Signin result
  */
 export const signIn = async (phone, password) => {
   try {
@@ -190,57 +159,7 @@ export const signIn = async (phone, password) => {
 };
 
 /**
- * Sign in with phone using OTP (One-Time Password)
- * @param {string} phone - User's phone number
- * @returns {Promise<{data: object, error: object}>} OTP send result
- */
-export const signInWithOTP = async (phone) => {
-  try {
-    const { data, error } = await supabase.auth.signInWithOtp({
-      phone,
-    });
-
-    if (error) {
-      console.error("OTP signin error:", error.message);
-      return { data: null, error };
-    }
-
-    return { data, error: null };
-  } catch (error) {
-    console.error("OTP signin exception:", error.message);
-    return { data: null, error };
-  }
-};
-
-/**
- * Verify OTP for phone authentication
- * @param {string} phone - User's phone number
- * @param {string} token - OTP token
- * @returns {Promise<{data: object, error: object}>} Verification result
- */
-export const verifyOTP = async (phone, token) => {
-  try {
-    const { data, error } = await supabase.auth.verifyOtp({
-      phone,
-      token,
-      type: "sms",
-    });
-
-    if (error) {
-      console.error("OTP verification error:", error.message);
-      return { data: null, error };
-    }
-
-    return { data, error: null };
-  } catch (error) {
-    console.error("OTP verification exception:", error.message);
-    return { data: null, error };
-  }
-};
-
-/**
  * Sign out the current user
- * @returns {Promise<{error: object}>} Signout result
  */
 export const signOut = async () => {
   try {
@@ -255,5 +174,215 @@ export const signOut = async () => {
   }
 };
 
-// Add default export to fix the warning
+/**
+ * Upload image to Supabase Storage (free tier: 1GB storage)
+ */
+export const uploadProductImage = async (imageUri, fileName) => {
+  try {
+    const response = await fetch(imageUri);
+    const blob = await response.blob();
+    
+    const { data, error } = await supabase.storage
+      .from('product-images')
+      .upload(`products/${fileName}`, blob, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (error) {
+      console.error("Error uploading image:", error.message);
+      return { data: null, error };
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('product-images')
+      .getPublicUrl(`products/${fileName}`);
+
+    return { data: { path: data.path, publicUrl }, error: null };
+  } catch (error) {
+    console.error("Upload exception:", error.message);
+    return { data: null, error };
+  }
+};
+
+/**
+ * Get all products
+ */
+export const getProducts = async (sellerId = null) => {
+  try {
+    let query = supabase
+      .from('products')
+      .select(`
+        *,
+        profiles:seller_id (
+          full_name,
+          phone
+        )
+      `)
+      .order('created_at', { ascending: false });
+
+    if (sellerId) {
+      query = query.eq('seller_id', sellerId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("Error fetching products:", error.message);
+      return { data: null, error };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error("Error fetching products:", error.message);
+    return { data: null, error };
+  }
+};
+
+/**
+ * Create a new product
+ */
+export const createProduct = async (productData) => {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .insert([{
+        title: productData.title,
+        description: productData.description,
+        image_url: productData.imageUrl,
+        price: productData.price,
+        quantity: productData.quantity,
+        location: productData.location,
+        seller_id: productData.sellerId
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creating product:", error.message);
+      return { data: null, error };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error("Error creating product:", error.message);
+    return { data: null, error };
+  }
+};
+
+/**
+ * Delete a product
+ */
+export const deleteProduct = async (productId) => {
+  try {
+    const { error } = await supabase
+      .from('products')
+      .delete()
+      .eq('id', productId);
+
+    if (error) {
+      console.error("Error deleting product:", error.message);
+      return { error };
+    }
+
+    return { error: null };
+  } catch (error) {
+    console.error("Error deleting product:", error.message);
+    return { error };
+  }
+};
+
+/**
+ * Get messages for a conversation
+ */
+export const getMessages = async (senderId, receiverId, productId) => {
+  try {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('product_id', productId)
+      .or(`and(sender_id.eq.${senderId},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${senderId})`)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error("Error fetching messages:", error.message);
+      return { data: null, error };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error("Error fetching messages:", error.message);
+    return { data: null, error };
+  }
+};
+
+/**
+ * Send a message
+ */
+export const sendMessage = async (messageData) => {
+  try {
+    const { data, error } = await supabase
+      .from('messages')
+      .insert([{
+        sender_id: messageData.senderId,
+        receiver_id: messageData.receiverId,
+        product_id: messageData.productId,
+        content: messageData.content
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error sending message:", error.message);
+      return { data: null, error };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error("Error sending message:", error.message);
+    return { data: null, error };
+  }
+};
+
+/**
+ * Get conversations for a user
+ */
+export const getConversations = async (userId) => {
+  try {
+    const { data, error } = await supabase
+      .from('messages')
+      .select(`
+        *,
+        products (
+          id,
+          title,
+          seller_id
+        ),
+        sender:profiles!messages_sender_id_fkey (
+          id,
+          full_name,
+          phone
+        ),
+        receiver:profiles!messages_receiver_id_fkey (
+          id,
+          full_name,
+          phone
+        )
+      `)
+      .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error("Error fetching conversations:", error.message);
+      return { data: null, error };
+    }
+
+    return { data, error: null };
+  } catch (error) {
+    console.error("Error fetching conversations:", error.message);
+    return { data: null, error };
+  }
+};
+
 export default supabase;

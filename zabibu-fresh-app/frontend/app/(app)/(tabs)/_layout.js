@@ -1,16 +1,14 @@
 import React from 'react';
 import { Tabs, Redirect } from 'expo-router';
-import { useAuth } from '../../contexts/AuthContext'; // Adjusted path
+import { useAuth } from '../../contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
-import { Button } from 'react-native';
-import { router } from 'expo-router'; // For navigation
+import { TouchableOpacity, Platform } from 'react-native';
+import { router } from 'expo-router';
 
 export default function TabLayout() {
-  const { profile } = useAuth(); // No need for session/loading here, parent layout handles it
+  const { profile } = useAuth();
 
   if (!profile) {
-    // This should ideally be caught by the parent (app)/_layout.js
-    // But as a safeguard:
     return <Redirect href="/(auth)/login" />;
   }
 
@@ -22,7 +20,7 @@ export default function TabLayout() {
           if (route.name === 'home') {
             iconName = focused ? 'home' : 'home-outline';
           } else if (route.name === 'products') {
-            iconName = focused ? 'list' : 'list-outline';
+            iconName = focused ? 'leaf' : 'leaf-outline';
           } else if (route.name === 'chat') {
             iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
           } else if (route.name === 'settings') {
@@ -31,36 +29,49 @@ export default function TabLayout() {
           return <Ionicons name={iconName} size={size} color={color} />;
         },
         tabBarActiveTintColor: '#6200ee',
-        tabBarInactiveTintColor: 'gray',
-        headerShown: true,
+        tabBarInactiveTintColor: '#999',
+        headerShown: false,
+        tabBarStyle: {
+          backgroundColor: '#fff',
+          borderTopWidth: 1,
+          borderTopColor: '#e0e0e0',
+          paddingBottom: Platform.OS === 'ios' ? 20 : 5,
+          height: Platform.OS === 'ios' ? 85 : 60,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+        },
       })}
     >
       <Tabs.Screen
         name="home"
         options={{
-          title: profile.role === 'seller' ? 'Dashboard' : 'Browse Grapes',
-          headerTitle: profile.role === 'seller' ? 'Seller Dashboard' : 'Browse Grapes',
-          headerRight: () => (
-            profile.role === 'seller' && Platform.OS !== 'web' ? ( // Example: Add button for sellers
-              <Button onPress={() => router.push('/(app)/add-product')} title="Add New" color="#007bff" />
-            ) : null
-          ),
+          title: 'Home',
+          tabBarLabel: 'Home',
         }}
       />
       <Tabs.Screen
         name="products"
         options={{
-          title: profile.role === 'seller' ? 'My Listings' : 'Catalog',
-          headerTitle: profile.role === 'seller' ? 'My Listings' : 'Product Catalog',
-          headerRight: () => (
-            profile.role === 'seller' && Platform.OS !== 'web' ? (
-              <Button onPress={() => router.push('/(app)/add-product')} title="Add New" color="#007bff" />
-            ) : null
-          ),
+          title: profile.role === 'seller' ? 'My Products' : 'Browse',
+          tabBarLabel: profile.role === 'seller' ? 'My Products' : 'Browse',
         }}
       />
-      <Tabs.Screen name="chat" options={{ title: 'Messages' }} />
-      <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
+      <Tabs.Screen
+        name="chat"
+        options={{
+          title: 'Messages',
+          tabBarLabel: 'Messages',
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarLabel: 'Settings',
+        }}
+      />
     </Tabs>
   );
 }

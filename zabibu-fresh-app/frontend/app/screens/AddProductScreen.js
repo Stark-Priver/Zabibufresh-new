@@ -1,6 +1,20 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, Alert, StyleSheet, ActivityIndicator, ScrollView, Image, TouchableOpacity, Platform } from 'react-native';
-import { supabase } from '../services/supabase';
+import { 
+  View, 
+  Text, 
+  TextInput, 
+  TouchableOpacity, 
+  Alert, 
+  StyleSheet, 
+  ActivityIndicator, 
+  ScrollView, 
+  Image,
+  KeyboardAvoidingView,
+  Platform 
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { createProduct } from '../services/supabase';
+import { uploadImage, generateImageFileName } from '../services/storage';
 import { useAuth } from '../contexts/AuthContext';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
@@ -11,13 +25,12 @@ const AddProductScreen = () => {
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
   const [quantity, setQuantity] = useState('');
-  const [location, setLocation] = useState(''); // e.g., "Dodoma City Center"
-  const [image, setImage] = useState(null); // Stores the selected image URI
-  const [imageFile, setImageFile] = useState(null); // Stores the actual image file/blob for upload
+  const [location, setLocation] = useState('');
+  const [image, setImage] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const pickImage = async () => {
-    // Request media library permissions
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission Denied', 'Sorry, we need camera roll permissions to make this work!');
@@ -28,25 +41,53 @@ const AddProductScreen = () => {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [4, 3],
-      quality: 0.7, // Compress image a bit
-      base64: true, // Request base64 data for direct DB storage
+      quality: 0.7,
+      base64: true,
     });
 
     if (!result.canceled && result.assets && result.assets.length > 0) {
       const asset = result.assets[0];
-      setImage(asset.uri); // For preview
-      // Convert base64 to a format suitable for Prisma Bytes (e.g., Buffer or Uint8Array)
-      // For simplicity, we'll store the base64 string directly if the backend handles conversion,
-      // or handle conversion here if needed. Prisma typically expects a Buffer.
-      // The `base64-arraybuffer` library was removed, so we'll send base64 string.
-      // The backend will need to handle this.
-      setImageFile(asset.base64); // Store base64 string
+      setImage(asset.uri);
+      setImageFile(asset.base64);
     }
+  };
+
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Denied', 'Sorry, we need camera permissions to make this work!');
+      return;
+    }
+
+    let result = await ImagePicker.launchCameraAsync({
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      const asset = result.assets[0];
+      setImage(asset.uri);
+      setImageFile(asset.base64);
+    }
+  };
+
+  const showImagePicker = () => {
+    Alert.alert(
+      "Select Image",
+      "Choose how you want to add a photo",
+      [
+        { text: "Camera", onPress: takePhoto },
+        { text: "Gallery", onPress: pickImage },
+        { text: "Cancel", style: "cancel" }
+      ]
+    );
   };
 
   const handleAddProduct = async () => {
     if (!title || !description || !price || !quantity || !location || !imageFile) {
-      Alert.alert('Missing Information', 'Please fill all fields and select an image.');
+      Alert.alert('Missing Information', 'Please fill all required fields.');
       return;
     }
     if (!profile || profile.role !== 'seller') {
@@ -57,32 +98,38 @@ const AddProductScreen = () => {
     setLoading(true);
 
     try {
-      // Add Product to Database with image data
+      let imageUrl = null;
+      
+      // Upload image if provided
+      if (imageFile) {
+        const fileName = generateImageFileName(user.id, 'product_image.jpg');
+        const uploadResult = await uploadImage(image, fileName);
+        
+        if (uploadResult.success) {
+          imageUrl = uploadResult.data.publicUrl;
+        } else {
+          Alert.alert('Upload Error', 'Failed to upload image. Product will be created without image.');
+        }
+      }
+
       const productData = {
         title,
         description,
-        image: imageFile, // Send base64 string
+        imageUrl,
         price: parseFloat(price),
         quantity: parseInt(quantity, 10),
         location,
-        sellerId: user.id,
+        sellerId: user.id
       };
 
-      // Assuming your Supabase client is set up to call a custom function
-      // or your backend API handles the Prisma insert.
-      // For this example, let's assume an RPC call to a Supabase function
-      // that internally uses Prisma.
-      // If you have a direct API endpoint (e.g., Next.js API route), adjust accordingly.
-
-      // const { data, error } = await supabase.rpc('create_product_with_image', productData);
-
-      // OR, if using a direct table insert and Prisma backend handles base64 conversion:
-      const { error } = await supabase.from('Product').insert([productData]);
-
+      const { data, error } = await createProduct(productData);
 
       if (error) throw error;
 
-      Alert.alert('Success', 'Product added successfully!');
+      Alert.alert('Success', 'Product added successfully!', [
+        { text: 'OK', onPress: () => router.back() }
+      ]);
+      
       // Clear form
       setTitle('');
       setDescription('');
@@ -91,7 +138,6 @@ const AddProductScreen = () => {
       setLocation('');
       setImage(null);
       setImageFile(null);
-      router.back(); // Or navigate to product list
 
     } catch (error) {
       console.error('Error adding product:', error);
@@ -103,85 +149,275 @@ const AddProductScreen = () => {
 
   if (profile?.role !== 'seller') {
     return (
-        <View style={styles.container}>
-            <Text>This page is for sellers only.</Text>
-            <Button title="Go Home" onPress={() => router.replace('/(app)/home')}/>
-        </View>
-    )
+      <View style={styles.unauthorizedContainer}>
+        <Ionicons name="warning-outline" size={60} color="#ff6b6b" />
+        <Text style={styles.unauthorizedTitle}>Access Restricted</Text>
+        <Text style={styles.unauthorizedText}>This page is for sellers only.</Text>
+        <TouchableOpacity style={styles.goHomeButton} onPress={() => router.replace('/(app)/home')}>
+          <Text style={styles.goHomeButtonText}>Go Home</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.scrollContainer}>
-      <View style={styles.container}>
-        <Text style={styles.title}>Add New Grape Product</Text>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Add New Product</Text>
+        </View>
 
-        <TextInput style={styles.input} placeholder="Product Title (e.g., Red Globe Grapes)" value={title} onChangeText={setTitle} />
-        <TextInput style={styles.input} placeholder="Description (e.g., Fresh, sweet, seedless)" value={description} onChangeText={setDescription} multiline />
-        <TextInput style={styles.input} placeholder="Price (TZS per Kg/Unit)" value={price} onChangeText={setPrice} keyboardType="numeric" />
-        <TextInput style={styles.input} placeholder="Quantity Available (e.g., 100 Kg)" value={quantity} onChangeText={setQuantity} keyboardType="numeric" />
-        <TextInput style={styles.input} placeholder="Location (e.g., Farm in Chamwino, Dodoma)" value={location} onChangeText={setLocation} />
+        <View style={styles.form}>
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Product Title</Text>
+            <TextInput 
+              style={styles.input} 
+              placeholder="e.g., Fresh Red Globe Grapes" 
+              value={title} 
+              onChangeText={setTitle} 
+            />
+          </View>
 
-        <TouchableOpacity style={styles.imagePickerButton} onPress={pickImage}>
-          <Text style={styles.imagePickerButtonText}>Pick an Image</Text>
-        </TouchableOpacity>
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Description</Text>
+            <TextInput 
+              style={[styles.input, styles.textArea]} 
+              placeholder="Describe your grapes (quality, taste, etc.)" 
+              value={description} 
+              onChangeText={setDescription} 
+              multiline 
+              numberOfLines={4}
+            />
+          </View>
 
-        {image && <Image source={{ uri: image }} style={styles.imagePreview} />}
+          <View style={styles.row}>
+            <View style={[styles.inputContainer, styles.halfWidth]}>
+              <Text style={styles.label}>Price (TZS per Kg)</Text>
+              <TextInput 
+                style={styles.input} 
+                placeholder="e.g., 5000" 
+                value={price} 
+                onChangeText={setPrice} 
+                keyboardType="numeric" 
+              />
+            </View>
 
-        {loading ? (
-          <ActivityIndicator size="large" color="#6200ee" style={{ marginTop: 20 }} />
-        ) : (
-          <Button title="Add Product" onPress={handleAddProduct} color="#6200ee" />
-        )}
-      </View>
-    </ScrollView>
+            <View style={[styles.inputContainer, styles.halfWidth]}>
+              <Text style={styles.label}>Quantity (Kg)</Text>
+              <TextInput 
+                style={styles.input} 
+                placeholder="e.g., 100" 
+                value={quantity} 
+                onChangeText={setQuantity} 
+                keyboardType="numeric" 
+              />
+            </View>
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Location</Text>
+            <TextInput 
+              style={styles.input} 
+              placeholder="e.g., Chamwino, Dodoma" 
+              value={location} 
+              onChangeText={setLocation} 
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Product Image</Text>
+            <TouchableOpacity style={styles.imagePickerButton} onPress={showImagePicker}>
+              <Ionicons name="camera-outline" size={24} color="#6200ee" />
+              <Text style={styles.imagePickerButtonText}>
+              {image ? 'Change Image' : 'Add Image (Optional)'}
+              </Text>
+            </TouchableOpacity>
+            {image && (
+              <View style={styles.imagePreviewContainer}>
+                <Image source={{ uri: image }} style={styles.imagePreview} />
+                <TouchableOpacity 
+                  style={styles.removeImageButton}
+                  onPress={() => {
+                    setImage(null);
+                    setImageFile(null);
+                  }}
+                >
+                  <Ionicons name="close-circle" size={24} color="#ff6b6b" />
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+
+          <TouchableOpacity 
+            style={[styles.addButton, loading && styles.addButtonDisabled]}
+            onPress={handleAddProduct}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="add-circle-outline" size={20} color="#fff" />
+                <Text style={styles.addButtonText}>Add Product</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
   scrollContainer: {
     flexGrow: 1,
   },
-  container: {
-    flex: 1,
-    padding: 20,
-    backgroundColor: '#f5f5f5',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 50,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  backButton: {
+    marginRight: 15,
   },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 20,
     color: '#333',
   },
-  input: {
-    height: 50,
-    borderColor: '#ddd',
-    borderWidth: 1,
-    marginBottom: 15,
-    paddingHorizontal: 15,
-    borderRadius: 8,
-    backgroundColor: '#fff',
+  form: {
+    padding: 20,
+  },
+  inputContainer: {
+    marginBottom: 20,
+  },
+  label: {
     fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  textArea: {
+    height: 100,
+    textAlignVertical: 'top',
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  halfWidth: {
+    width: '48%',
   },
   imagePickerButton: {
-    backgroundColor: '#007bff',
-    padding: 15,
-    borderRadius: 8,
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 15,
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 15,
+    borderWidth: 2,
+    borderColor: '#6200ee',
+    borderStyle: 'dashed',
   },
   imagePickerButtonText: {
-    color: '#fff',
+    color: '#6200ee',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  imagePreviewContainer: {
+    position: 'relative',
+    marginTop: 10,
   },
   imagePreview: {
     width: '100%',
     height: 200,
+    borderRadius: 12,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+  },
+  addButton: {
+    backgroundColor: '#6200ee',
+    borderRadius: 12,
+    paddingVertical: 15,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 20,
+    shadowColor: "#6200ee",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  addButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  addButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  unauthorizedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#f8f9fa',
+  },
+  unauthorizedTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  unauthorizedText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 30,
+  },
+  goHomeButton: {
+    backgroundColor: '#6200ee',
+    paddingHorizontal: 30,
+    paddingVertical: 12,
     borderRadius: 8,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#ddd',
+  },
+  goHomeButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 

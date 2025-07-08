@@ -1,14 +1,27 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, Alert, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { 
+  View, 
+  Text, 
+  TextInput, 
+  TouchableOpacity, 
+  Alert, 
+  StyleSheet, 
+  ActivityIndicator, 
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView 
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase, getUserProfile } from '../services/supabase';
-import { useAuth } from '../contexts/AuthContext'; // Assuming useAuth provides setProfile
-import { Link, router } from 'expo-router';
+import { useAuth } from '../contexts/AuthContext';
+import { router } from 'expo-router';
 
 const LoginScreen = () => {
   const [emailOrPhone, setEmailOrPhone] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const { setProfile } = useAuth(); // To update profile in context after login
+  const [showPassword, setShowPassword] = useState(false);
+  const { setProfile } = useAuth();
 
   const handleLogin = async () => {
     if (!emailOrPhone || !password) {
@@ -26,10 +39,8 @@ const LoginScreen = () => {
         password: password,
       });
     } else {
-      // Assuming phone numbers are stored with a country code if needed by Supabase
-      // Or that Supabase is configured to handle local formats
       authResponse = await supabase.auth.signInWithPassword({
-        phone: emailOrPhone, // Ensure this matches Supabase's expected format
+        phone: emailOrPhone,
         password: password,
       });
     }
@@ -43,92 +54,210 @@ const LoginScreen = () => {
     }
 
     if (authData.user) {
-      // Fetch user profile to get the role
       const profile = await getUserProfile(authData.user.id);
       if (profile) {
-        setProfile(profile); // Update AuthContext
-        // Navigate to home or dashboard based on role if needed, or let AuthProvider handle it
-        // router.replace('/(app)'); // Or a role-specific route
+        setProfile(profile);
       } else {
-        // This case should ideally not happen if profile is created on signup
         Alert.alert('Login Successful, but profile not found.', 'Please complete your profile or contact support.');
-        // Potentially log them out or redirect to a profile creation screen
         await supabase.auth.signOut();
       }
     }
     setLoading(false);
-    // Navigation to the main app stack will be handled by the AuthProvider/Router listening to auth state changes
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Zabibu Fresh</Text>
-      <Text style={styles.subtitle}>Login</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Email or Phone"
-        value={emailOrPhone}
-        onChangeText={setEmailOrPhone}
-        autoCapitalize="none"
-        keyboardType={emailOrPhone.includes('@') ? 'email-address' : 'phone-pad'}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-      {loading ? (
-        <ActivityIndicator size="large" color="#6200ee" />
-      ) : (
-        <Button title="Login" onPress={handleLogin} color="#6200ee" />
-      )}
-      <TouchableOpacity onPress={() => router.push('/signup')}>
-        <Text style={styles.linkText}>Don't have an account? Sign Up</Text>
-      </TouchableOpacity>
-       <TouchableOpacity onPress={() => router.push('/forgot-password')}>
-        <Text style={styles.linkText}>Forgot Password?</Text>
-      </TouchableOpacity>
-    </View>
+    <KeyboardAvoidingView 
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <View style={styles.header}>
+          <View style={styles.logoContainer}>
+            <Ionicons name="leaf" size={60} color="#6200ee" />
+          </View>
+          <Text style={styles.title}>Zabibu Fresh</Text>
+          <Text style={styles.subtitle}>Welcome Back</Text>
+          <Text style={styles.description}>
+            Connect with grape sellers and buyers in Dodoma region
+          </Text>
+        </View>
+
+        <View style={styles.form}>
+          <View style={styles.inputContainer}>
+            <Ionicons name="person-outline" size={20} color="#666" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Email or Phone Number"
+              value={emailOrPhone}
+              onChangeText={setEmailOrPhone}
+              autoCapitalize="none"
+              keyboardType={emailOrPhone.includes('@') ? 'email-address' : 'phone-pad'}
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
+            <TextInput
+              style={styles.input}
+              placeholder="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+            />
+            <TouchableOpacity 
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.eyeIcon}
+            >
+              <Ionicons 
+                name={showPassword ? "eye-off-outline" : "eye-outline"} 
+                size={20} 
+                color="#666" 
+              />
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity 
+            style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+            onPress={handleLogin}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.loginButtonText}>Login</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => router.push('/forgot-password')}>
+            <Text style={styles.forgotText}>Forgot Password?</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Don't have an account?</Text>
+          <TouchableOpacity onPress={() => router.push('/signup')}>
+            <Text style={styles.signupText}>Sign Up</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  scrollContainer: {
+    flexGrow: 1,
     justifyContent: 'center',
     padding: 20,
-    backgroundColor: '#f5f5f5',
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  logoContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
   },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: 10,
     color: '#333',
+    marginBottom: 8,
   },
   subtitle: {
-    fontSize: 24,
-    textAlign: 'center',
-    marginBottom: 30,
-    color: '#555',
+    fontSize: 20,
+    color: '#6200ee',
+    marginBottom: 8,
   },
-  input: {
-    height: 50,
-    borderColor: '#ddd',
-    borderWidth: 1,
+  description: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  form: {
+    marginBottom: 30,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
     marginBottom: 15,
     paddingHorizontal: 15,
-    borderRadius: 8,
-    backgroundColor: '#fff',
-    fontSize: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  linkText: {
-    marginTop: 20,
+  inputIcon: {
+    marginRight: 10,
+  },
+  input: {
+    flex: 1,
+    height: 50,
+    fontSize: 16,
+    color: '#333',
+  },
+  eyeIcon: {
+    padding: 5,
+  },
+  loginButton: {
+    backgroundColor: '#6200ee',
+    borderRadius: 12,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+    shadowColor: "#6200ee",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  loginButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  loginButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  forgotText: {
     color: '#6200ee',
     textAlign: 'center',
     fontSize: 16,
+    marginTop: 20,
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  footerText: {
+    color: '#666',
+    fontSize: 16,
+  },
+  signupText: {
+    color: '#6200ee',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 5,
   },
 });
 

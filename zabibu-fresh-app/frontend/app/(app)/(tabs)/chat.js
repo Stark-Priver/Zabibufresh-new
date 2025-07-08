@@ -1,77 +1,66 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-import { useAuth } from '../../contexts/AuthContext'; // Adjusted path
-import { supabase } from '../../services/supabase'; // Adjusted path
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  FlatList, 
+  TouchableOpacity, 
+  ActivityIndicator, 
+  Alert,
+  RefreshControl 
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../contexts/AuthContext';
+import { getConversations } from '../../services/supabase';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 
 const ChatScreen = () => {
   const { profile } = useAuth();
   const [conversations, setConversations] = useState([]);
   const [loading, setLoading] = useState(true);
-  const params = useLocalSearchParams(); // To catch potential productId & sellerId for starting a new chat
+  const [refreshing, setRefreshing] = useState(false);
+  const params = useLocalSearchParams();
 
   const fetchConversations = async () => {
     if (!profile) return;
     setLoading(true);
     try {
-      // This is a simplified way to get conversations.
-      // A more robust approach would involve a 'conversations' table or more complex queries
-      // to group messages by sender/receiver pairs and product.
-      // Here, we fetch distinct users the current user has messaged or received messages from.
+      const { data: messages, error } = await getConversations(profile.id);
 
-      // Fetch users who sent messages to the current user
-      const { data: receivedMessagesUsers, error: receivedError } = await supabase
-        .from('Message')
-        .select('senderId, sender:User!Message_senderId_fkey(id, fullName), Product(id, title)')
-        .eq('receiverId', profile.id);
-      if (receivedError) throw receivedError;
+      if (error) throw error;
 
-      // Fetch users to whom the current user sent messages
-      const { data: sentMessagesUsers, error: sentError } = await supabase
-        .from('Message')
-        .select('receiverId, receiver:User!Message_receiverId_fkey(id, fullName), Product(id, title)')
-        .eq('senderId', profile.id);
-      if (sentError) throw sentError;
-
-      // Combine and create a unique list of conversation partners
-      const userMap = new Map();
-
-      receivedMessagesUsers.forEach(msg => {
-        if (msg.sender && msg.Product) { // Ensure sender and product are not null
-          const key = `${msg.sender.id}-${msg.Product.id}`;
-          if (!userMap.has(key)) {
-            userMap.set(key, {
-              partner: msg.sender,
-              product: msg.Product,
-              // lastMessage: msg.content, // Simplification, real last message needs ordering
-              // timestamp: msg.timestamp
-            });
-          }
+      // Group messages by conversation (unique combination of users and product)
+      const conversationMap = new Map();
+      
+      for (const message of messages || []) {
+        if (!message.products) continue;
+        
+        const otherUserId = message.sender_id === profile.id ? message.receiver_id : message.sender_id;
+        const conversationKey = `${otherUserId}_${message.product_id}`;
+        
+        if (!conversationMap.has(conversationKey)) {
+          const otherUser = message.sender_id === profile.id ? message.receiver : message.sender;
+          
+          conversationMap.set(conversationKey, {
+            id: conversationKey,
+            otherUser: {
+              id: otherUser.id,
+              fullName: otherUser.full_name,
+              phone: otherUser.phone
+            },
+            product: {
+              id: message.products.id,
+              title: message.products.title,
+              sellerId: message.products.seller_id
+            },
+            lastMessage: message.content,
+            lastMessageTime: message.created_at,
+            unreadCount: 0,
+          });
         }
-      });
+      }
 
-      sentMessagesUsers.forEach(msg => {
-         if (msg.receiver && msg.Product) { // Ensure receiver and product are not null
-            const key = `${msg.receiver.id}-${msg.Product.id}`;
-            if (!userMap.has(key)) {
-                userMap.set(key, {
-                partner: msg.receiver,
-                product: msg.Product,
-                // lastMessage: msg.content,
-                // timestamp: msg.timestamp
-                });
-            }
-        }
-      });
-
-      // For a real app, you'd fetch the actual last message and timestamp for each conversation.
-      // This is a placeholder to show the structure.
-      const uniqueConversations = Array.from(userMap.values());
-      // Sort by a placeholder or implement fetching last message timestamp
-      // uniqueConversations.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-
-      setConversations(uniqueConversations);
+      setConversations(Array.from(conversationMap.values()));
     } catch (error) {
       console.error("Error fetching conversations:", error);
       Alert.alert('Error', 'Could not fetch conversations: ' + error.message);
@@ -89,24 +78,41 @@ const ChatScreen = () => {
   );
 
   useEffect(() => {
-    // If navigated with productId and sellerId, try to open that chat directly
-    // This is a basic way to handle it. A more robust solution might involve checking if a conversation already exists.
+    // Handle navigation from product screen to start new chat
     const { productId, sellerId, productTitle, receiverName } = params;
     if (productId && sellerId && profile && sellerId !== profile.id) {
-      // Prevent navigating to chat with oneself if sellerId is current user
       router.push({
-        pathname: `/(app)/chat/[chatId]`, // Assuming a dynamic route for individual chats
+        pathname: `/(app)/chat/[chatId]`,
         params: {
-            chatId: `${sellerId}_${productId}`, // Synthetic ID for the chat room
-            receiverId: sellerId,
-            productId: productId,
-            productTitle: productTitle || 'Product',
-            receiverName: receiverName || 'Seller'
+          chatId: `${sellerId}_${productId}`,
+          receiverId: sellerId,
+          productId: productId,
+          productTitle: productTitle || 'Product',
+          receiverName: receiverName || 'Seller'
         }
       });
     }
   }, [params, profile]);
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchConversations();
+    setRefreshing(false);
+  };
+
+  const formatTime = (timestamp) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffInHours = (now - date) / (1000 * 60 * 60);
+    
+    if (diffInHours < 24) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else if (diffInHours < 48) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString();
+    }
+  };
 
   const renderConversationItem = ({ item }) => (
     <TouchableOpacity
@@ -114,67 +120,143 @@ const ChatScreen = () => {
       onPress={() => router.push({
         pathname: `/(app)/chat/[chatId]`,
         params: {
-            chatId: `${item.partner.id}_${item.product.id}`,
-            receiverId: item.partner.id,
-            receiverName: item.partner.fullName,
-            productId: item.product.id,
-            productTitle: item.product.title
+          chatId: item.id,
+          receiverId: item.otherUser.id,
+          receiverName: item.otherUser.fullName,
+          productId: item.product.id,
+          productTitle: item.product.title
         }
       })}
     >
-      <View style={styles.avatarPlaceholder}><Text style={styles.avatarText}>{item.partner.fullName?.charAt(0).toUpperCase()}</Text></View>
-      <View style={styles.conversationDetails}>
-        <Text style={styles.partnerName}>{item.partner.fullName}</Text>
-        <Text style={styles.productTitleText}>Product: {item.product.title}</Text>
-        {/* <Text style={styles.lastMessage} numberOfLines={1}>{item.lastMessage || "Tap to chat"}</Text> */}
-        <Text style={styles.lastMessage} numberOfLines={1}>{"Tap to chat about " + item.product.title}</Text>
+      <View style={styles.avatarContainer}>
+        <Text style={styles.avatarText}>
+          {item.otherUser.fullName?.charAt(0).toUpperCase() || 'U'}
+        </Text>
       </View>
-      {/* <Text style={styles.timestamp}>{item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : ''}</Text> */}
+      
+      <View style={styles.conversationDetails}>
+        <View style={styles.conversationHeader}>
+          <Text style={styles.partnerName}>{item.otherUser.fullName}</Text>
+          <Text style={styles.timestamp}>{formatTime(item.lastMessageTime)}</Text>
+        </View>
+        <Text style={styles.productTitle} numberOfLines={1}>
+          📦 {item.product.title}
+        </Text>
+        <Text style={styles.lastMessage} numberOfLines={1}>
+          {item.lastMessage}
+        </Text>
+      </View>
+      
+      <Ionicons name="chevron-forward" size={20} color="#ccc" />
     </TouchableOpacity>
   );
 
-  if (loading) {
-    return <ActivityIndicator size="large" color="#6200ee" style={styles.loader} />;
-  }
-
-  if (conversations.length === 0) {
-    return (
-      <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>You have no active conversations.</Text>
-        {profile?.role === 'buyer' &&
-            <Button title="Browse Products to Start Chatting" onPress={() => router.push('/(app)/(tabs)/products')} />
+  const EmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <Ionicons name="chatbubbles-outline" size={80} color="#ccc" />
+      <Text style={styles.emptyTitle}>No Conversations Yet</Text>
+      <Text style={styles.emptyText}>
+        {profile?.role === 'buyer' 
+          ? "Start browsing products and contact sellers to begin conversations."
+          : "Buyers will contact you about your products. Your conversations will appear here."
         }
+      </Text>
+      {profile?.role === 'buyer' && (
+        <TouchableOpacity 
+          style={styles.browseButton} 
+          onPress={() => router.push('/(app)/(tabs)/products')}
+        >
+          <Ionicons name="search" size={16} color="#fff" />
+          <Text style={styles.browseButtonText}>Browse Products</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#6200ee" />
+        <Text style={styles.loadingText}>Loading conversations...</Text>
       </View>
     );
   }
 
   return (
-    <FlatList
-      data={conversations}
-      renderItem={renderConversationItem}
-      keyExtractor={(item, index) => `${item.partner.id}-${item.product.id}-${index}`} // Ensure unique key
-      style={styles.list}
-    />
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Messages</Text>
+        <Text style={styles.headerSubtitle}>
+          {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}
+        </Text>
+      </View>
+
+      {/* Conversations List */}
+      <FlatList
+        data={conversations}
+        renderItem={renderConversationItem}
+        keyExtractor={(item) => item.id}
+        style={styles.list}
+        contentContainerStyle={conversations.length === 0 ? styles.emptyListContainer : null}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListEmptyComponent={EmptyState}
+        showsVerticalScrollIndicator={false}
+      />
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  loader: {
+  container: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  list: {
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
+  header: {
     backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
+  list: {
+    flex: 1,
+  },
+  emptyListContainer: {
+    flex: 1,
   },
   conversationItem: {
     flexDirection: 'row',
-    padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
     alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
   },
-  avatarPlaceholder: {
+  avatarContainer: {
     width: 50,
     height: 50,
     borderRadius: 25,
@@ -191,36 +273,63 @@ const styles = StyleSheet.create({
   conversationDetails: {
     flex: 1,
   },
+  conversationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
   partnerName: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: 'bold',
-  },
-  productTitleText: {
-    fontSize: 14,
-    color: '#555',
-    fontStyle: 'italic',
-  },
-  lastMessage: {
-    fontSize: 14,
-    color: '#777',
-    marginTop: 3,
+    color: '#333',
   },
   timestamp: {
     fontSize: 12,
     color: '#999',
-    marginLeft: 10,
+  },
+  productTitle: {
+    fontSize: 13,
+    color: '#6200ee',
+    marginBottom: 2,
+    fontWeight: '500',
+  },
+  lastMessage: {
+    fontSize: 14,
+    color: '#666',
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 40,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 20,
+    marginBottom: 10,
   },
   emptyText: {
-    fontSize: 18,
-    color: '#555',
+    fontSize: 16,
+    color: '#666',
     textAlign: 'center',
-    marginBottom: 20,
+    lineHeight: 22,
+    marginBottom: 30,
+  },
+  browseButton: {
+    backgroundColor: '#6200ee',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  browseButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
 });
 
