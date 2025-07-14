@@ -56,7 +56,7 @@ To get a local copy up and running, follow these simple steps.
 
 1. **Clone the repo:**
    ```sh
-   git clone https://github.com/your-username/zabibu-fresh.git
+   git clone https://github.com/Stark-Priver/Zabibufresh-new
    ```
 2. **Install NPM packages for the frontend:**
    ```sh
@@ -122,6 +122,5 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 ## Contact
 
-Your Name - [@your_twitter](https://twitter.com/your_twitter) - email@example.com
 
-Project Link: [https://github.com/your-username/zabibu-fresh](https://github.com/your-username/zabibu-fresh)
+Project Link: [https://github.com/Stark-Priver/Zabibufresh-new](https://github.com/Stark-Priver/Zabibufresh-new)
